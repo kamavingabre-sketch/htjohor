@@ -46,7 +46,6 @@ class WalkieService : Service(), WalkieSocketListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIF_ID, buildNotification("Menghubungkan..."))
-        socket.connect()
         val username  = intent?.getStringExtra(EXTRA_USERNAME)  ?: "Petugas"
         val userId    = intent?.getStringExtra(EXTRA_USERID)    ?: "unknown"
         val channelId = intent?.getStringExtra(EXTRA_CHANNEL)   ?: "umum"
