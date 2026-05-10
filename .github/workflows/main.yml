@@ -41,11 +41,10 @@ jobs:
           gradle-version: "8.6"
 
       - name: Generate Gradle Wrapper
-        working-directory: android-app
         run: gradle wrapper --gradle-version 8.6
 
       - name: Grant execute permission for gradlew
-        run: chmod +x android-app/gradlew
+        run: chmod +x gradlew
 
       - name: Determine server URL
         id: server_url
@@ -61,7 +60,6 @@ jobs:
           echo "Server URL: $URL"
 
       - name: Build Debug APK
-        working-directory: android-app
         run: |
           ./gradlew assembleDebug \
             -PSERVER_URL="${{ steps.server_url.outputs.url }}" \
@@ -70,7 +68,6 @@ jobs:
 
       - name: Build Release APK (signed)
         if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
-        working-directory: android-app
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
