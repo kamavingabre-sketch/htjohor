@@ -1,0 +1,133 @@
+name: Build & Release APK — Walkie Johor
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: 'WebSocket server URL (wss://...)'
+        required: false
+        default: ''
+
+env:
+  JAVA_VERSION: '17'
+  ANDROID_API_LEVEL: '34'
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x android-app/gradlew
+
+      - name: Determine server URL
+        id: server_url
+        run: |
+          URL="${{ github.event.inputs.server_url }}"
+          if [ -z "$URL" ]; then
+            URL="${{ secrets.SERVER_URL }}"
+          fi
+          if [ -z "$URL" ]; then
+            URL="wss://walkie.medanjohor.go.id"
+          fi
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "Server URL: $URL"
+
+      - name: Build Debug APK
+        working-directory: android-app
+        run: |
+          ./gradlew assembleDebug \
+            -PSERVER_URL="${{ steps.server_url.outputs.url }}" \
+            --no-daemon \
+            --stacktrace
+
+      - name: Build Release APK (signed)
+        if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
+        working-directory: android-app
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          # Decode keystore from base64 secret
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > walkie-johor.keystore
+            export KEYSTORE_FILE="$(pwd)/walkie-johor.keystore"
+            ./gradlew assembleRelease \
+              -PSERVER_URL="${{ steps.server_url.outputs.url }}" \
+              -PKEYSTORE_FILE="$KEYSTORE_FILE" \
+              -PKEYSTORE_PASSWORD="$KEYSTORE_PASSWORD" \
+              -PKEY_ALIAS="$KEY_ALIAS" \
+              -PKEY_PASSWORD="$KEY_PASSWORD" \
+              --no-daemon \
+              --stacktrace
+          else
+            echo "No keystore configured — skipping signed release build"
+          fi
+
+      - name: Rename APK files
+        run: |
+          mkdir -p artifacts
+          find android-app/app/build/outputs/apk -name "*.apk" | while read f; do
+            TYPE=$(echo $f | grep -o 'debug\|release')
+            cp "$f" "artifacts/WalkieJohor-${{ github.run_number }}-${TYPE}.apk"
+          done
+          ls -la artifacts/
+
+      - name: Upload Debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WalkieJohor-debug-${{ github.run_number }}
+          path: artifacts/WalkieJohor-*-debug.apk
+          retention-days: 30
+
+      - name: Upload Release APK artifact
+        uses: actions/upload-artifact@v4
+        if: hashFiles('artifacts/WalkieJohor-*-release.apk') != ''
+        with:
+          name: WalkieJohor-release-${{ github.run_number }}
+          path: artifacts/WalkieJohor-*-release.apk
+          retention-days: 90
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.apk
+          name: "Walkie Johor ${{ github.ref_name }}"
+          body: |
+            ## Walkie Johor ${{ github.ref_name }}
+
+            **Aplikasi Walkie Talkie — Kecamatan Medan Johor**
+
+            ### Instalasi
+            1. Download APK di bawah
+            2. Aktifkan "Sumber tidak dikenal" di pengaturan HP
+            3. Install APK
+            4. Masuk dengan nama dan kelurahan
+
+            ### Changelog
+            - Build otomatis dari GitHub Actions
+            - Server: `${{ steps.server_url.outputs.url }}`
+          draft: false
+          prerelease: false
